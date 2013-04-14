@@ -185,7 +185,7 @@ local function toStrType(t)
     local stringify = {
         -- Keys are all possible strings that type() may return,
         -- per http://www.lua.org/manual/5.1/manual.html#pdf-type.
-        ["nil"]  		= function(v) return "nil (nil)"			    end,
+        ["nil"]			= function(v) return "nil (nil)"			    end,
         ["string"]		= function(v) return '"'..v..'" (string)'	    end,
         ["number"]		= function(v) return v.." (number)"			    end,
         ["boolean"]		= function(v) return tostring(v).." (boolean)"  end,
@@ -519,6 +519,9 @@ end
 
 doTicker = function()
 	m = peripheral.wrap("left")
+	if ( m == nil ) then
+		print("No monitor found on left, this will be a problem.")
+	end
 	m.clear()
 	m.setCursorBlink(false)
 
