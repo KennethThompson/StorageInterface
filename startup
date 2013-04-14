@@ -1,0 +1,577 @@
+rednet.open("back")
+local database = {}
+local idLookup = {}
+
+function newT( t )
+   local mt = {}
+   -- set methods
+   mt.__index = {
+      -- set key order table inside __index for faster lookup
+      _korder = {},
+      -- traversal of hidden values
+      hidden = function() return pairs( mt.__index ) end,
+      -- traversal of table ordered: returning index, key
+      ipairs = function( self ) return ipairs( self._korder ) end,
+      -- traversal of table
+      pairs = function( self ) return pairs( self ) end,
+      -- traversal of table ordered: returning key,value
+      opairs = function( self )
+         local i = 0
+         local function iter( self )
+            i = i + 1
+            local k = self._korder[i]
+            if k then
+               return k,self[k]
+            end
+         end
+         return iter,self
+      end,
+      -- to be able to delete entries we must write a delete function
+      del = function( self,key )
+         if self[key] then
+            self[key] = nil
+            for i,k in ipairs( self._korder ) do
+               if k == key then
+                  table.remove( self._korder, i )
+                  return
+               end
+            end
+         end
+      end,
+   }
+   -- set new index handling
+   mt.__newindex = function( self,k,v )
+      if k ~= "del" and v then
+         rawset( self,k,v )
+         table.insert( self._korder, k )
+      end      
+   end
+   return setmetatable( t or {},mt )
+end
+
+--------------------------------------
+-- Insert value of any type into array
+--------------------------------------
+local function arrayInsert( ary, val, idx )
+    -- Needed because table.insert has issues
+    -- An "array" is a table indexed by sequential
+    -- positive integers (no empty slots)
+    local lastUsed = #ary + 1
+    local nextAvail = lastUsed + 1
+
+    -- Determine correct index value
+    local index = tonumber(idx) -- Don't use idx after this line!
+    if (index == nil) or (index > nextAvail) then
+        index = nextAvail
+    elseif (index < 1) then
+        index = 1
+    end
+
+    -- Insert the value
+    if ary[index] == nil then
+        ary[index] = val
+    else
+        -- TBD: Should we try to allow for skipped indices?
+        for j = nextAvail,index,-1 do
+            ary[j] = ary[j-1]
+        end
+        ary[index] = val
+    end
+end
+
+--------------------------------
+-- Compare two items of any type
+--------------------------------
+local function compareAnyTypes( op1, op2 ) -- Return the comparison result
+    -- Inspired by http://lua-users.org/wiki/SortedIteration
+    local type1, type2 = type(op1),     type(op2)
+    local num1,  num2  = tonumber(op1), tonumber(op2)
+    
+    if ( num1 ~= nil) and (num2 ~= nil) then  -- Number or numeric string
+        return  num1 < num2                     -- Numeric compare
+    elseif type1 ~= type2 then                -- Different types
+        return type1 < type2                    -- String compare of type name
+    -- From here on, types are known to match (need only single compare)
+    elseif type1 == "string"  then            -- Non-numeric string
+        return op1 < op2                        -- Default compare
+    elseif type1 == "boolean" then
+        return op1                              -- No compare needed!
+         -- Handled above: number, string, boolean
+    else -- What's left:   function, table, thread, userdata
+        return tostring(op1) < tostring(op2)  -- String representation
+    end
+end
+
+-------------------------------------------
+-- Iterate over a table in sorted key order
+-------------------------------------------
+local function pairsByKeys (tbl, func)
+    -- Inspired by http://www.lua.org/pil/19.3.html
+    -- and http://lua-users.org/wiki/SortedIteration
+
+    if func == nil then
+        func = compareAnyTypes
+    end
+
+    -- Build a sorted array of the keys from the passed table
+    -- Use an insertion sort, since table.sort fails on non-numeric keys
+    local ary = {}
+    local lastUsed = 0
+    for key --[[, val--]] in pairs(tbl) do
+        if (lastUsed == 0) then
+            ary[1] = key
+        else
+            local done = false
+            for j=1,lastUsed do  -- Do an insertion sort
+                if (func(key, ary[j]) == true) then
+                    arrayInsert( ary, key, j )
+                    done = true
+                    break
+                end
+            end
+            if (done == false) then
+                ary[lastUsed + 1] = key
+            end
+        end
+        lastUsed = lastUsed + 1
+    end
+
+    -- Define (and return) the iterator function
+    local i = 0                -- iterator variable
+    local iter = function ()   -- iterator function
+        i = i + 1
+        if ary[i] == nil then
+            return nil
+        else
+            return ary[i], tbl[ary[i]]
+        end
+    end
+    return iter
+end
+SortFunc = function (myTable)
+    local t = {}
+    for title,value in pairsByKeys(myTable) do
+        table.insert(t, { title = title, value = value })
+    end
+    myTable = t
+    return myTable
+end
+---------------------------------------------
+-- Return indentation string for passed level
+---------------------------------------------
+local function tabs(i)
+    return string.rep(".",i).." "   -- Dots followed by a space
+end
+
+-----------------------------------------------------------
+-- Return string representation of parameter's value & type
+-----------------------------------------------------------
+local function toStrType(t)
+    local function fttu2hex(t) -- Grab hex value from tostring() output
+        local str = tostring(t);
+        if str == nil then
+            return "tostring() failure! \n"
+        else
+            local str2 = string.match(str,"[ :][ (](%x+)")
+            if str2 == nil then
+                return "string.match() failure: "..str.."\n"
+            else
+                return "0x"..str2
+            end
+        end
+    end
+    -- Stringify a value of a given type using a table of functions keyed
+    -- by the name of the type (Lua's version of C's switch() statement).
+    local stringify = {
+        -- Keys are all possible strings that type() may return,
+        -- per http://www.lua.org/manual/5.1/manual.html#pdf-type.
+        ["nil"]  		= function(v) return "nil (nil)"			    end,
+        ["string"]		= function(v) return '"'..v..'" (string)'	    end,
+        ["number"]		= function(v) return v.." (number)"			    end,
+        ["boolean"]		= function(v) return tostring(v).." (boolean)"  end,
+        ["function"]	= function(v) return fttu2hex(v).." (function)" end,
+        ["table"]		= function(v) return fttu2hex(v).." (table)"	end,
+        ["thread"]		= function(v) return fttu2hex(v).." (thread)"	end,
+        ["userdata"]	= function(v) return fttu2hex(v).." (userdata)" end
+    }
+    return stringify[type(t)](t)
+end
+
+-------------------------------------
+-- Count elements in the passed table
+-------------------------------------
+local function lenTable(t)		-- What Lua builtin does this simple thing?
+    local n=0                   -- '#' doesn't work with mixed key types
+    if ("table" == type(t)) then
+        for key in pairs(t) do  -- Just count 'em
+            n = n + 1
+        end
+        return n
+    else
+        return nil
+    end
+end
+
+--------------------------------
+-- Pretty-print the passed table
+--------------------------------
+local function do_dumptable(t, indent, seen)
+    -- "seen" is an initially empty table used to track all tables
+    -- that have been dumped so far.  No table is dumped twice.
+    -- This also keeps the code from following self-referential loops,
+    -- the need for which was found when first dumping "_G".
+    if ("table" == type(t)) then	-- Dump passed table
+        seen[t] = 1
+        if (indent == 0) then
+            print ("The passed table has "..lenTable(t).." entries:")
+            indent = 1
+        end
+        for f,v in pairsByKeys(t) do
+            if ("table" == type(v)) and (seen[v] == nil) then    -- Recurse
+                print( tabs(indent)..toStrType(f).." has "..lenTable(v).." entries: {")
+                do_dumptable(v, indent+1, seen)
+                print( tabs(indent).."}" )
+            else
+                print( tabs(indent)..toStrType(f).." = "..toStrType(v))
+            end
+        end
+    else
+        print (tabs(indent).."Not a table!")
+    end
+end
+
+--------------------------------
+-- Wrapper to handle persistence
+--------------------------------
+function dumptable(t)   -- Only global declaration in the package
+    -- This wrapper exists only to set the environment for the first run:
+    -- The second param is the indentation level.
+    -- The third param is the list of tables dumped during this call.
+    -- Getting this list allocated and freed was a pain, and this
+    -- wrapper was the best solution I came up with...
+    return do_dumptable(t, 0, {})
+end
+
+ function makemsg(idfrom, idto, msgType, msg)
+	local final = ""
+	final = "HORACEV1|"  .. idfrom .. "|" .. idto .. "|" .. msgType .."|" .. msg
+	return final
+end
+
+
+function explode(div,str)
+    if (div=='') then return false end
+    local pos,arr = 0,{}
+    for st,sp in function() return string.find(str,div,pos,true) end do
+        table.insert(arr,string.sub(str,pos,st-1))
+        pos = sp + 1
+    end
+    table.insert(arr,string.sub(str,pos))
+    return arr
+end
+
+
+function validateWeeblerMsg( msg )
+	 --print("Validating message... ")
+	 local m = 0
+	 local ret = false
+	 local cmd = nill
+	 local cmdType = nill
+	 for i,v in pairs(explode("|", message)) do
+		 if ( m == 0 ) then
+			 if( v == "HORACEV1" ) then
+				-- print("WeeblerV1 message: TRUE")
+				 else
+					 return ret
+			 end
+		 end
+		 if ( m == 1 ) then
+			 --print( "Msg From: " .. v )
+		 end
+		 if ( m == 2 ) then
+			
+			 if ( v ~= "0" and tonumber(v) ~= os.getComputerID() ) then
+				 --print( "Msg To: " .. v .. " which is not us, validation falied.")
+				 return false
+				 else
+					 ret = true
+					
+			 end
+		 end
+		 if ( m == 3 ) then
+			 --print( "CmdType: " .. v )
+			 ctype = v
+			 --cmd = v
+			 --return ret, cmd
+		 end
+		 if ( m == 4 ) then
+			 --print( "Command: " .. v )
+			 cmd = v
+			 return ret, ctype, cmd
+		 end
+		 --print("[" .. i .. "] = " .. v)
+		 m = m+1
+	 end
+	 return ret
+ end
+ 
+ function loadTable(str)
+	--local file = fs.open(name,"r")
+	--local data = file.readAll()
+	--file.close()
+	return textutils.unserialize(str)
+end
+
+function sendCmd( toid, cmd )
+	if (toid == 0) then
+		rednet.broadcast(msg)
+		else
+			rednet.send( toid, cmd )
+	end
+	
+end
+
+function processCmd(ctype, cmd, resp)
+	if( ctype:lower() == "query" ) then
+		local tmp = loadTable( cmd )
+		if( #tmp > 0 and type(tmp) == "table" ) then
+			for item = 1, #tmp do
+				for key, value in pairs (tmp[item]) do
+					--print( item .. " " .. key .. " " .. queryItemName(tonumber(value.uuid)) )
+					local bfound = false
+					for keyb, valueb in pairs (database) do
+						if( keyb == tonumber(value.uuid) ) then
+							bfound = true
+							valueb.amount = value.amount
+						end
+					end
+					if (bfound ~= true) then
+						local newitem = {}
+						newitem.uuid = value.uuid
+						newitem.amount = value.amount
+						table.insert(database, tonumber(value.uuid), newitem) 
+					end
+				end
+			end
+		end
+	end
+	if( ctype:lower() == "restart" ) then
+		print("Restart received")
+		sleep(5)
+		processRestartCmd(resp);
+	end
+end
+
+function table_print (tt, indent, done)
+  done = done or {}
+  indent = indent or 0
+  if type(tt) == "table" then
+    local sb = {}
+    for key, value in pairs (tt) do
+      table.insert(sb, string.rep (" ", indent)) -- indent it
+      if type (value) == "table" and not done [value] then
+        done [value] = true
+        table.insert(sb, "{\n");
+        table.insert(sb, table_print (value, indent + 2, done))
+        table.insert(sb, string.rep (" ", indent)) -- indent it
+        table.insert(sb, "}\n");
+      elseif "number" == type(key) then
+        table.insert(sb, string.format("\"%s\"\n", tostring(value)))
+      else
+        table.insert(sb, string.format(
+            "%s = \"%s\"\n", tostring (key), tostring(value)))
+       end
+    end
+    return table.concat(sb)
+  else
+    return tt .. "\n"
+  end
+end
+
+function to_string( tbl )
+    if  "nil"       == type( tbl ) then
+        return tostring(nil)
+    elseif  "table" == type( tbl ) then
+        return table_print(tbl)
+    elseif  "string" == type( tbl ) then
+        return tbl
+    else
+        return tostring(tbl)
+    end
+end
+
+-- see if the file exists
+function file_exists(file)
+ -- local f = io.open(file, "rb")
+-- if f then f:close() end
+--  return f ~= nil
+end
+
+function queryItemName(uuid)
+	if (idLookup == nil or #idLookup == 0 ) then
+		return "Error"
+	end
+	local bFound = false
+	local n = nil
+	for key, value in pairs (idLookup) do
+		if ( tonumber(value.uuid) == tonumber(uuid) ) then
+			--print( "FOUND IT!")
+			bFound = true
+			n = value.name
+			break
+		end
+	end
+	if ( not bFound ) then
+		return "Unknown Item ID (" .. uuid .. ")"
+	end
+	return n
+end
+
+function loadLookups(name)
+	local file = fs.open(name,"r")
+	--local data = file.readAll()
+	local tb = {}
+	local eof = false;
+	while( not eof ) do
+		local l = file.readLine()
+
+		if ( l ~= nil ) then
+			local ltb = explode("|", l)
+			local tm = 1
+			local tkey = nil
+			for key, value in pairs (ltb) do
+				if ( tm % 2 ~= 0 ) then
+					tkey = value
+					else
+						local blah = { }
+						blah.uuid = tkey
+						blah.name = value
+						table.insert(tb, blah)
+				end
+				tm = tm + 1
+			end
+			else
+				eof = true
+		end
+	end
+
+	file.close()
+	idLookup = tb
+
+end
+
+function printItemPage(db, pageid)
+	m.clear()
+	m.setCursorBlink(false)
+	local colpos = 3 -- start positions for the page
+	local linepos = 2
+	local x, y = m.getSize()
+	local dbCount = 0;
+
+	for key, value in pairs (db) do
+		value.name = queryItemName(tonumber(value.uuid))
+		dbCount = dbCount + 1
+	end
+	local ndatabase = SortFunc(db)
+
+	table.sort(ndatabase, function(x,y) return x.value.name < y.value.name end)
+	local startid = y-2 / (pageid-1)
+	print ("Database has " .. dbCount .. " items.")
+	local id = 0
+	local tids = 0
+	local bhasnext = false
+	for _,t in ipairs(ndatabase) do 
+			if (id >= startid and tids < (y-2)*2 ) then
+				m.setCursorPos(colpos,linepos)
+				m.write(t.value.name)-- .. "\t" .. " Count = " .. t.value.amount );
+				m.setCursorPos(colpos+25,linepos)
+				m.write("[" .. t.value.amount .. "]")
+				linepos = linepos + 2
+			if ( linepos >= y-2 ) then
+				if( colpos + 60 >= x ) then
+					-- do nothing. We don't have screen space
+					bhasnext = true -- let the end routine know we have a next button
+					--print("has next!")
+					break
+				end
+				--print("next column" .. x .. " " .. colpos )
+				linepos = 2
+				colpos = 40
+
+			end
+				tids = tids + 1
+			else
+				id = id + 1
+		end
+	end
+	if( pageid ~= 1 ) then
+		m.setCursorPos(2+2, y-1)
+		m.write("Back")
+	end
+	if( bhasnext ) then
+		m.setCursorPos(x- (#"Next Page"+8) , y-1)
+		m.write("Next Page")
+	end
+	image = paintutils.loadImage("bar")
+	paintutils.drawImage(image, 3, 5)
+
+end
+
+doTicker = function()
+	m = peripheral.wrap("left")
+	m.clear()
+	m.setCursorBlink(false)
+
+	local x = os.clock()
+	while (true) do
+		if (os.clock() - x) > 5 then
+			local file = 'idlookup'
+			local status, err = pcall(loadLookups, file)
+			--loadLookups(file)
+			x = os.clock()
+		end
+		pcall(printItemPage, database, 1)
+		
+		sleep(1)
+	end
+end
+
+
+main = function()
+ 	local x = os.clock()
+	while (true) do
+		id, message  = rednet.receive(1)
+		if id ~= nill and id ~= os.getComputerID() then
+			--print("Received a message..." .. id)
+			--print(message)
+			--local b, c
+			local b, t, c = validateWeeblerMsg(message)
+			if  (b == true ) then
+				--print("Received a valid message, processing command: " .. c )
+				processCmd(t, c, id)
+				
+			end
+		end
+	end
+	--print(string.format("elapsed time: %.2f\n", os.clock() - x))
+end
+function2 = function()
+	rednet.broadcast(makemsg(os.getComputerID(), 0, "query", ""))
+end
+
+sendLoop = function()
+	while (true) do
+		local tm = {}
+		tm.uuid = 3
+		tm.amount = 493
+		st = textutils.serialize(tm)
+		local msg = makemsg( os.getComputerID(), 0, "queryStorage", st )
+		--print( msg )
+		rednet.broadcast(msg)
+		sleep(2)
+	end
+end
+
+
+parallel.waitForAll (main, sendLoop, doTicker)
+
