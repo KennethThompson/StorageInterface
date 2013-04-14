@@ -1,3 +1,4 @@
+print("Starting up interface..")
 rednet.open("back")
 local database = {}
 local idLookup = {}
@@ -577,4 +578,3 @@ end
 
 
 parallel.waitForAll (main, sendLoop, doTicker)
-
