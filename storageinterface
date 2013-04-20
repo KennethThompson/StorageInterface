@@ -583,6 +583,10 @@ event, side, X, Y = os.pullEventRaw()
 	print(side)
 	print(X)
 	print(Y)
+	local colpos = 1
+	local linepos = 1
+	m.setCursorPos(colpos,linepos)
+	m.write("X = " .. X .. ", Y = " .. Y .. ", side = " .. side )
          -- if (x1 <= X and x2 >= X and y1 <= Y and y2 >= Y) then
          --       bip()
          -- else
