@@ -580,6 +580,9 @@ function key1(x1, x2, y1, y2)
 event, side, X, Y = os.pullEventRaw()
   if event == "monitor_touch" then
 	print("event!")
+	print(side)
+	print(X)
+	print(Y)
          -- if (x1 <= X and x2 >= X and y1 <= Y and y2 >= Y) then
          --       bip()
          -- else
