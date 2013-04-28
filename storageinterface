@@ -2,6 +2,8 @@ print("Starting up interface..")
 rednet.open("back")
 local database = {}
 local idLookup = {}
+local curmons = nil
+
 
 function newT( t )
    local mt = {}
@@ -325,12 +327,17 @@ end
 
 function sendCmd( toid, cmd )
 	if (toid == 0) then
-		rednet.broadcast(msg)
+		rednet.broadcast(cmd)
 		else
 			rednet.send( toid, cmd )
 	end
 	
 end
+function updateScreen()
+	pcall(printItemPage, database, 1)
+end
+
+
 
 function processCmd(ctype, cmd, resp)
 	if( ctype:lower() == "query" ) then
@@ -352,6 +359,7 @@ function processCmd(ctype, cmd, resp)
 						newitem.amount = value.amount
 						table.insert(database, tonumber(value.uuid), newitem) 
 					end
+					--updateScreen()
 				end
 			end
 		end
@@ -460,13 +468,265 @@ function loadLookups(name)
 	idLookup = tb
 
 end
+function locateScreens()
 
-function printItemPage(db, pageid)
-	m.clear()
-	m.setCursorBlink(false)
+		local dirs = { "top", "bottom", "back", "front", "left", "right" }
+		--local dirs = {0, 1, 2, 3, 4, 5}
+		local found = {}
+		local cnt = 0
+		for i, dir in ipairs(dirs) do
+		  --print (name)
+		  	if peripheral.isPresent(dir) and peripheral.getType(dir) == "monitor" then
+				local newscreen = {}
+				
+				local obj = peripheral.wrap(dir)
+				newscreen.obj = obj
+				local x, y = newscreen.obj.getSize()
+				newscreen.side = dir
+				newscreen.width = x
+				newscreen.height = y
+				
+			--	newitem.amount = value.amount
+				table.insert(found, cnt, newscreen)
+				cnt = cnt + 1
+				--print( peripheral.getType(dir) )
+				--print("Found a sorter peripheral. Location = " .. dir)
+				--queryStorage(dir)
+				--return true, dir
+			end
+		end
+		return found
+		--return false, "no sorter found"
+end
+
+printItemID = function(id)
+	print("Item clicked = " .. id )
+end
+
+modifySelectedCount = function(args)
+	print("Modifying on screen amounts" .. args.modifier)
+	args.oldargs.count = args.oldargs.count + args.modifier
+	resourceSelectedScreen(args.oldargs)
+end
+
+getRequestPendingScreen = function(args)
+	if( args.count <= 0 ) then
+	resourceSelectedScreen(args)
+	return
+	end
+	local req = {}
+	req.uuid = args.uuid
+	req.amount = args.count
+	local s = makemsg(os.getComputerID(), 0, "get", textutils.serialize(req))
+	print("Sending request!!!!" .. s)
+	sendCmd(0, s)
+	printItemPageEx(args.cancelargs)
+end
+
+resourceSelectedScreen = function(args)
+
+	-- args.mon is the current monitor
+	-- args.uuid is the UID of the crap we're expecting
+	-- args.name is the name of the UUID for human readability
+	-- args.cancel is the function to which we default cancel to
+	-- args.amount is how much we got
+	-- args.count is the selected amount
+	--local cnt = args.count
 	local colpos = 3 -- start positions for the page
 	local linepos = 2
-	local x, y = m.getSize()
+	args.mon.hitgrid = {}
+	
+	local x, y = args.mon.obj.getSize()
+	print("Inside resourceSelectedScreen")
+	args.mon.pageName = "resourceSelectedScreen" 
+	linepos = y -- set to the bottom of the screen
+	args.mon.obj.clear()
+	args.mon.obj.setCursorPos(colpos,linepos)
+	args.mon.obj.write("Cancel")
+	
+	local newhit = {} -- our new hit test obj
+	local topLeft = {}
+	local bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = #"Cancel"--colpos+50 -- fixed number for now
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = printItemPageEx
+	newhit.funcargs = args.cancelargs
+	table.insert(args.mon.hitgrid, newhit)
+	
+	linepos = linepos - 2
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"-10"--colpos+50 -- fixed number for now
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = modifySelectedCount
+	local tmpargs = {}
+	tmpargs.oldargs = args
+	newhit.funcargs = tmpargs
+	if( args.count >= 10 ) then 
+		tmpargs.modifier = -10 
+		else
+		if( args.count ~= 0 ) then
+			tmpargs.modifier = (args.count - args.amount) - args.count
+			else
+			tmpargs.modifier = 0
+		end
+	end
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("-10")
+	
+	local midpoint = x / 2
+	local strl = #"Send"
+	local strl = midpoint - (strl/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"Send"
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = getRequestPendingScreen
+	newhit.funcargs = args
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("Send")
+	
+	strl = #"+10"
+	strl = x - 3 - strl
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"+10"--colpos+50 -- fixed number for now
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = modifySelectedCount
+	local tmpargs = {}
+	tmpargs.oldargs = args
+		if( args.amount >= args.count + 10 ) then 
+		tmpargs.modifier = 10
+		else
+		tmpargs.modifier = args.amount - args.count
+	end
+	newhit.funcargs = tmpargs
+
+
+	--newhit.funcargs = args
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("+10")
+	
+	linepos = linepos - 2 -- next section of the screen
+	colpos = 3
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"-1"--colpos+50 -- fixed number for now
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = modifySelectedCount
+	local tmpargs = {}
+	tmpargs.oldargs = args
+	newhit.funcargs = tmpargs
+	if( args.count >= 1 ) then 
+		tmpargs.modifier = -1 
+		else
+		if( args.count ~= 0 ) then
+			tmpargs.modifier = (args.count - args.amount) - args.count
+			else
+			tmpargs.modifier = 0
+		end
+	end
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("-1")
+	
+	--local midpoint = x / 2
+	strl = #tostring(args.count)
+	strl = midpoint - (strl/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	args.mon.obj.write(tostring(args.count))
+	
+	strl = #"+1"
+	strl = x - 3 - strl
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"+1"--colpos+50 -- fixed number for now
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = modifySelectedCount
+	local tmpargs = {}
+	tmpargs.oldargs = args
+		if( args.amount >= args.count + 1 ) then 
+		tmpargs.modifier = 1
+		else
+		tmpargs.modifier = args.amount - args.count
+	end
+	newhit.funcargs = tmpargs
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("+1")
+
+	linepos = linepos - 5 -- next section of the screen
+	colpos = 3
+
+	strl = #tostring(args.amount)
+	strl = midpoint - (strl/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	args.mon.obj.write(tostring(args.amount))
+	
+	
+	linepos = 5--linepos - 2 -- next section of the screen
+	colpos = 3
+
+	strl = #tostring(args.name)
+	strl = midpoint - (strl/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	args.mon.obj.write(tostring(args.name))
+end
+printItemPageEx = function(args)
+	m.clear()
+	printItemPage(args.db, args.pageid, args.m)
+end
+printItemPage = function(db, pageid, m)
+	--m.clear()
+	m.obj.setCursorBlink(false)
+	m.pageName = "printItemPage"
+	
+	
+	local hitgrid = {} -- our hit grid for the printed page
+	
+	local colpos = 3 -- start positions for the page
+	local linepos = 2
+	--
+	local x, y = m.obj.getSize()
+	
 	local dbCount = 0;
 
 	for key, value in pairs (db) do
@@ -474,20 +734,63 @@ function printItemPage(db, pageid)
 		dbCount = dbCount + 1
 	end
 	local ndatabase = SortFunc(db)
-
+	
 	table.sort(ndatabase, function(x,y) return x.value.name < y.value.name end)
 	local startid = y-2 / (pageid-1)
-	print ("Database has " .. dbCount .. " items.")
+	--print ("Database has " .. dbCount .. " items.")
 	local id = 0
 	local tids = 0
 	local bhasnext = false
 	for _,t in ipairs(ndatabase) do 
 			if (id >= startid and tids < (y-2)*2 ) then
-				m.setCursorPos(colpos,linepos)
-				m.write(t.value.name)-- .. "\t" .. " Count = " .. t.value.amount );
-				m.setCursorPos(colpos+25,linepos)
-				m.write("[" .. t.value.amount .. "]")
+				
+				local newhit = {} -- our new hit test obj
+				-- we're going to take the top left and bottom right
+				local topLeft = {}
+				local bottomRight = {}
+				
+				topLeft.x = colpos
+				topLeft.y = linepos
+				
+				bottomRight.x = colpos+50 -- fixed number for now
+				bottomRight.y = linepos
+				
+				newhit.topLeft = topLeft
+				newhit.bottomRight = bottomRight
+				newhit.func = resourceSelectedScreen
+				-- args.mon is the current monitor
+				-- args.uuid is the UID of the crap we're expecting
+				-- args.name is the name of the UUID for human readability
+				-- args.cancel is the function to which we default cancel to
+				-- args.amount is how much we got
+				-- args.count is how much they want, zero for default
+				local args = {}
+				args.mon = m
+				args.uuid = t.value.uuid
+				args.name = t.value.name
+				args.cancel = printItemPage
+				local cancelargs = {}
+				cancelargs.db = db
+				cancelargs.pageid = pageid
+				cancelargs.m = m
+				args.cancelargs = cancelargs
+				args.amount = t.value.amount
+				args.count = 0
+				newhit.funcargs = args
+				
+				table.insert(hitgrid, tids, newhit)
+				
+				m.obj.setCursorPos(colpos,linepos)
+				m.obj.write(string.rep(" ",25)) -- clear the line
+				m.obj.setCursorPos(colpos,linepos)
+				m.obj.write(t.value.name)-- .. "\t" .. " Count = " .. t.value.amount );
+				m.obj.setCursorPos(colpos+25,linepos)
+				m.obj.write(string.rep(" ", 25)) -- clear the line
+				m.obj.setCursorPos(colpos+25,linepos)
+				m.obj.write("[" .. t.value.amount .. "]")
+
 				linepos = linepos + 2
+				
 			if ( linepos >= y-2 ) then
 				if( colpos + 60 >= x ) then
 					-- do nothing. We don't have screen space
@@ -506,36 +809,91 @@ function printItemPage(db, pageid)
 		end
 	end
 	if( pageid ~= 1 ) then
-		m.setCursorPos(2+2, y-1)
-		m.write("Back")
+		m.obj.setCursorPos(2+2, y-1)
+		m.obj.write("Back")
 	end
 	if( bhasnext ) then
-		m.setCursorPos(x- (#"Next Page"+8) , y-1)
-		m.write("Next Page")
+		m.obj.setCursorPos(x- (#"Next Page"+8) , y-1)
+		m.obj.write("Next Page")
 	end
-	image = paintutils.loadImage("bar")
-	paintutils.drawImage(image, 3, 5)
+	m.hitgrid = hitgrid
+	return m
+	--image = paintutils.loadImage("bar")
+	--paintutils.drawImage(image, 3, 5)
 
 end
 
+function hitTest(mons, side, X, Y)
+	for i, mon in ipairs(mons) do
+		if( mon.side == side ) then
+			for i, ht in ipairs(mon.hitgrid) do
+				if( Y >= (ht.topLeft.y-1) and Y <= (ht.bottomRight.y+1) and X >= ht.topLeft.x and X <= ht.bottomRight.x) then
+					ht.func(ht.funcargs)
+				end
+			end
+		end
+	end
+end
+
+function updateMonitors(monin)
+	local monitors = locateScreens()
+	--print( "Found " .. lenTable(monitors) .. " monitors.")
+	if( monin == nil or lenTable(monin) == 0) then 
+		monin = {} 
+	end
+	local nextind = 0
+	for i, mon in ipairs(monitors) do
+		local found = false
+		for x, monx in ipairs(monin) do
+			if ( monx.side == mon.side ) then
+				found = true
+				-- update size params
+				monx.height = mon.height
+				monx.width = mon.width
+				if ( monx.obj == nil ) then
+					print("Monitor was missing from " .. monx.side .. " but has been restored.")
+					monx.obj = mon.obj
+				end
+			end
+		end
+		if ( found == false ) then
+			mon.obj.clear()
+			table.insert(monin, nextind, mon)
+			print("Found a new monitor, side = " .. mon.side )
+		end
+
+		nextind = nextind + 1
+	end
+	-- check for removals
+	for x, monx in ipairs(monin) do
+		if ( not peripheral.isPresent(monx.side) or peripheral.getType(monx.side) ~= "monitor" ) then
+			--print("Monitor was located on " .. monx.side .. " but now is gone.")
+			monx.obj = nil
+		end
+	end
+	return monin
+end
+
 doTicker = function()
-	m = peripheral.wrap("left")
 	if ( m == nil ) then
 		print("No monitor found on left, this will be a problem.")
 	end
-	m.clear()
-	m.setCursorBlink(false)
 
 	local x = os.clock()
 	while (true) do
 		if (os.clock() - x) > 5 then
 			local file = 'idlookup'
 			local status, err = pcall(loadLookups, file)
-			--loadLookups(file)
 			x = os.clock()
 		end
-		pcall(printItemPage, database, 1)
-		
+		--local checkm = locateScreens()
+		curmons = updateMonitors(curmons)
+		for i, mon in ipairs(curmons) do
+			if( mon.obj ~= nil and (mon.pageName == nil or mon.pageName == "printItemPage") ) then
+				mon = printItemPage(database, 1, mon)
+				print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+			end
+		end
 		sleep(1)
 	end
 end
@@ -573,20 +931,25 @@ sendLoop = function()
 		--print( msg )
 		rednet.broadcast(msg)
 		sleep(2)
+
 	end
 end
+
+
+
 
 function key1(x1, x2, y1, y2)
 event, side, X, Y = os.pullEventRaw()
   if event == "monitor_touch" then
-	print("event!")
-	print(side)
-	print(X)
-	print(Y)
-	local colpos = 1
-	local linepos = 1
-	m.setCursorPos(colpos,linepos)
-	m.write("X = " .. X .. ", Y = " .. Y .. ", side = " .. side )
+	--print("event!")
+	--print(side)
+	--print(X)
+	--print(Y)
+	--local colpos = 1
+	--local linepos = 1
+	hitTest(curmons, side, X, Y)
+	--m.setCursorPos(colpos,linepos)
+	print("X = " .. X .. ", Y = " .. Y .. ", side = " .. side )
          -- if (x1 <= X and x2 >= X and y1 <= Y and y2 >= Y) then
          --       bip()
          -- else
