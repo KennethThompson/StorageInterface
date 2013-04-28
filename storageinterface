@@ -1,9 +1,9 @@
 print("Starting up interface..")
-rednet.open("back")
+--rednet.open("back")
 local database = {}
 local idLookup = {}
 local curmons = nil
-
+local currentResult = nil
 
 function newT( t )
    local mt = {}
@@ -280,6 +280,7 @@ function validateWeeblerMsg( msg )
 	 local ret = false
 	 local cmd = nill
 	 local cmdType = nill
+	 local directedTo = 0
 	 for i,v in pairs(explode("|", message)) do
 		 if ( m == 0 ) then
 			 if( v == "HORACEV1" ) then
@@ -292,9 +293,14 @@ function validateWeeblerMsg( msg )
 			 --print( "Msg From: " .. v )
 		 end
 		 if ( m == 2 ) then
-			
+			if( tonumber(v) == os.getComputerID() ) then
+				--print("Received a message to us! " .. msg)
+				directedTo = tonumber(v)
+
+			end
 			 if ( v ~= "0" and tonumber(v) ~= os.getComputerID() ) then
 				 --print( "Msg To: " .. v .. " which is not us, validation falied.")
+				 --directedTo = tonumber(v)
 				 return false
 				 else
 					 ret = true
@@ -310,7 +316,7 @@ function validateWeeblerMsg( msg )
 		 if ( m == 4 ) then
 			 --print( "Command: " .. v )
 			 cmd = v
-			 return ret, ctype, cmd
+			 return ret, ctype, cmd, directedTo
 		 end
 		 --print("[" .. i .. "] = " .. v)
 		 m = m+1
@@ -333,13 +339,18 @@ function sendCmd( toid, cmd )
 	end
 	
 end
-function updateScreen()
-	pcall(printItemPage, database, 1)
+
+
+
+function processGetResponse(cmd)
+	local tmp = loadTable( cmd )
+	--print(to_string(tmp))
+	currentResult = {}
+	currentResult.result = tmp.result
+	currentResult.msg = tmp.msg
 end
 
-
-
-function processCmd(ctype, cmd, resp)
+function processCmd(ctype, cmd, resp, to)
 	if( ctype:lower() == "query" ) then
 		local tmp = loadTable( cmd )
 		if( #tmp > 0 and type(tmp) == "table" ) then
@@ -368,6 +379,15 @@ function processCmd(ctype, cmd, resp)
 		print("Restart received")
 		sleep(5)
 		processRestartCmd(resp);
+	end
+	if( ctype:lower() == "getresponse" ) then
+		if( to == os.getComputerID() ) then
+		--	print("Response was directed to " .. to)
+		processGetResponse(cmd)
+		end
+		--print("Get Response!")
+		--sleep(5)
+		--processRestartCmd(resp);
 	end
 end
 
@@ -418,13 +438,12 @@ end
 
 function queryItemName(uuid)
 	if (idLookup == nil or #idLookup == 0 ) then
-		return "Error"
+		return "Loading.."
 	end
 	local bFound = false
 	local n = nil
 	for key, value in pairs (idLookup) do
 		if ( tonumber(value.uuid) == tonumber(uuid) ) then
-			--print( "FOUND IT!")
 			bFound = true
 			n = value.name
 			break
@@ -469,7 +488,6 @@ function loadLookups(name)
 
 end
 function locateScreens()
-
 		local dirs = { "top", "bottom", "back", "front", "left", "right" }
 		--local dirs = {0, 1, 2, 3, 4, 5}
 		local found = {}
@@ -485,20 +503,24 @@ function locateScreens()
 				newscreen.side = dir
 				newscreen.width = x
 				newscreen.height = y
-				
-			--	newitem.amount = value.amount
 				table.insert(found, cnt, newscreen)
 				cnt = cnt + 1
-				--print( peripheral.getType(dir) )
-				--print("Found a sorter peripheral. Location = " .. dir)
-				--queryStorage(dir)
-				--return true, dir
 			end
 		end
 		return found
-		--return false, "no sorter found"
 end
-
+function initModem()
+		local dirs = { "top", "bottom", "back", "front", "left", "right" }
+		for i, dir in ipairs(dirs) do
+		  	if peripheral.isPresent(dir) and peripheral.getType(dir) == "modem" then
+				rednet.open(dir)
+				print("Found a modem on the " .. dir .. " side.")
+				return true
+			end
+		end
+		print("A modem must be attached for the storage interface application to function correctly.")
+		return false
+end
 printItemID = function(id)
 	print("Item clicked = " .. id )
 end
@@ -509,18 +531,79 @@ modifySelectedCount = function(args)
 	resourceSelectedScreen(args.oldargs)
 end
 
+
+function printToCenterScreen(mon, msg, scale)
+	mon.clear()
+	mon.setTextScale(scale)
+	mon.write("")
+	local x, y = mon.getSize()
+	local midpointx = x / 2
+	local midpointy = y / 2
+	local strl = #msg
+	strl = midpointx - (strl/2)
+	local colpos = strl
+	local linepos = midpointy
+	
+	mon.setCursorPos(colpos,linepos)
+	
+	mon.write(msg)
+
+end
+
+
 getRequestPendingScreen = function(args)
 	if( args.count <= 0 ) then
 	resourceSelectedScreen(args)
 	return
 	end
+	args.mon.pageName = "getRequestPendingScreen" 
+
+	args.mon.obj.clear()
+
 	local req = {}
+	currentResult = nil
 	req.uuid = args.uuid
 	req.amount = args.count
 	local s = makemsg(os.getComputerID(), 0, "get", textutils.serialize(req))
-	print("Sending request!!!!" .. s)
 	sendCmd(0, s)
-	printItemPageEx(args.cancelargs)
+	local x = os.clock()
+	
+	while (true) do
+		if( currentResult ~= nil ) then
+			printToCenterScreen(args.mon.obj, "INCOMING!", 2)
+			sleep(2)
+			printItemPageEx(args.cancelargs)
+			return
+		end
+		if (os.clock() - x) > 5 then
+			printToCenterScreen(args.mon.obj, "FAIL", 2)
+			sleep(2)
+			printItemPageEx(args.cancelargs)
+			--local file = 'idlookup'
+			--local status, err = pcall(loadLookups, file)
+			--x = os.clock()
+			return
+		end
+		
+		if( math.floor(os.clock()) % 2 > 0 ) then
+
+			printToCenterScreen(args.mon.obj, "Requesting resources. ", 1)
+			sleep(.5)
+			printToCenterScreen(args.mon.obj, "Requesting resources..", 1)
+			else
+			printToCenterScreen(args.mon.obj, "Requesting resources  ", 1)
+		end
+		sleep(.5)
+	end
+	
+	
+
+	--print("Sending request!!!!" .. s)
+	
+	
+	
+	
+	--printItemPageEx(args.cancelargs)
 end
 
 resourceSelectedScreen = function(args)
@@ -535,7 +618,7 @@ resourceSelectedScreen = function(args)
 	local colpos = 3 -- start positions for the page
 	local linepos = 2
 	args.mon.hitgrid = {}
-	
+	args.mon.obj.setTextScale(2) --Sets size
 	local x, y = args.mon.obj.getSize()
 	print("Inside resourceSelectedScreen")
 	args.mon.pageName = "resourceSelectedScreen" 
@@ -564,7 +647,7 @@ resourceSelectedScreen = function(args)
 	bottomRight = {}
 	topLeft.x = colpos
 	topLeft.y = linepos
-	bottomRight.x = colpos + #"-10"--colpos+50 -- fixed number for now
+	bottomRight.x = colpos + #"-8"--colpos+50 -- fixed number for now
 	bottomRight.y = linepos
 	newhit.topLeft = topLeft
 	newhit.bottomRight = bottomRight
@@ -572,8 +655,8 @@ resourceSelectedScreen = function(args)
 	local tmpargs = {}
 	tmpargs.oldargs = args
 	newhit.funcargs = tmpargs
-	if( args.count >= 10 ) then 
-		tmpargs.modifier = -10 
+	if( args.count >= 8 ) then 
+		tmpargs.modifier = -8 
 		else
 		if( args.count ~= 0 ) then
 			tmpargs.modifier = (args.count - args.amount) - args.count
@@ -582,7 +665,7 @@ resourceSelectedScreen = function(args)
 		end
 	end
 	table.insert(args.mon.hitgrid, newhit)
-	args.mon.obj.write("-10")
+	args.mon.obj.write("-8")
 	
 	local midpoint = x / 2
 	local strl = #"Send"
@@ -603,7 +686,7 @@ resourceSelectedScreen = function(args)
 	table.insert(args.mon.hitgrid, newhit)
 	args.mon.obj.write("Send")
 	
-	strl = #"+10"
+	strl = #"+8"
 	strl = x - 3 - strl
 	colpos = strl
 	args.mon.obj.setCursorPos(colpos,linepos)
@@ -612,15 +695,15 @@ resourceSelectedScreen = function(args)
 	bottomRight = {}
 	topLeft.x = colpos
 	topLeft.y = linepos
-	bottomRight.x = colpos + #"+10"--colpos+50 -- fixed number for now
+	bottomRight.x = colpos + #"+8"--colpos+50 -- fixed number for now
 	bottomRight.y = linepos
 	newhit.topLeft = topLeft
 	newhit.bottomRight = bottomRight
 	newhit.func = modifySelectedCount
 	local tmpargs = {}
 	tmpargs.oldargs = args
-		if( args.amount >= args.count + 10 ) then 
-		tmpargs.modifier = 10
+		if( args.amount >= args.count + 8 ) then 
+		tmpargs.modifier = 8
 		else
 		tmpargs.modifier = args.amount - args.count
 	end
@@ -629,7 +712,7 @@ resourceSelectedScreen = function(args)
 
 	--newhit.funcargs = args
 	table.insert(args.mon.hitgrid, newhit)
-	args.mon.obj.write("+10")
+	args.mon.obj.write("+8")
 	
 	linepos = linepos - 2 -- next section of the screen
 	colpos = 3
@@ -691,7 +774,7 @@ resourceSelectedScreen = function(args)
 	table.insert(args.mon.hitgrid, newhit)
 	args.mon.obj.write("+1")
 
-	linepos = linepos - 5 -- next section of the screen
+	linepos = linepos - 3 -- next section of the screen
 	colpos = 3
 
 	strl = #tostring(args.amount)
@@ -701,7 +784,7 @@ resourceSelectedScreen = function(args)
 	args.mon.obj.write(tostring(args.amount))
 	
 	
-	linepos = 5--linepos - 2 -- next section of the screen
+	linepos = linepos - 1--linepos - 2 -- next section of the screen
 	colpos = 3
 
 	strl = #tostring(args.name)
@@ -711,14 +794,16 @@ resourceSelectedScreen = function(args)
 	args.mon.obj.write(tostring(args.name))
 end
 printItemPageEx = function(args)
-	m.clear()
+	args.m.obj.clear()
+	print("Printing page " ..  args.pageid)
 	printItemPage(args.db, args.pageid, args.m)
 end
 printItemPage = function(db, pageid, m)
 	--m.clear()
 	m.obj.setCursorBlink(false)
 	m.pageName = "printItemPage"
-	
+	m.pageid = pageid
+	m.obj.setTextScale(1) --Sets size
 	
 	local hitgrid = {} -- our hit grid for the printed page
 	
@@ -736,13 +821,23 @@ printItemPage = function(db, pageid, m)
 	local ndatabase = SortFunc(db)
 	
 	table.sort(ndatabase, function(x,y) return x.value.name < y.value.name end)
-	local startid = y-2 / (pageid-1)
+	--local startid = (y-2) / (pageid-1)
+	local maxcols = math.floor(x / 60)
+	if ( maxcols == 0 ) then maxcols = 1 end
+	
+	--print( "MAX X = " .. x .. " MAX Y = " .. y)
+	local maxrows = (y-6)/2
+	local maxitemsdisplayed = maxcols * maxrows
+	--local cnt = lenTable(ndatabase)
+	local startid = maxitemsdisplayed * (pageid-1)--(pageid-1)  cnt;
 	--print ("Database has " .. dbCount .. " items.")
+	print("start id " .. startid)
 	local id = 0
 	local tids = 0
 	local bhasnext = false
 	for _,t in ipairs(ndatabase) do 
-			if (id >= startid and tids < (y-2)*2 ) then
+			--print( "id " .. id .. " start id " .. startid .. " tids " .. tids .. " max items " .. maxitemsdisplayed )
+			if (id >= startid and tids < maxitemsdisplayed ) then
 				
 				local newhit = {} -- our new hit test obj
 				-- we're going to take the top left and bottom right
@@ -778,7 +873,7 @@ printItemPage = function(db, pageid, m)
 				args.count = 0
 				newhit.funcargs = args
 				
-				table.insert(hitgrid, tids, newhit)
+				table.insert(hitgrid, newhit)
 				
 				m.obj.setCursorPos(colpos,linepos)
 				m.obj.write(string.rep(" ",25)) -- clear the line
@@ -791,29 +886,66 @@ printItemPage = function(db, pageid, m)
 
 				linepos = linepos + 2
 				
-			if ( linepos >= y-2 ) then
-				if( colpos + 60 >= x ) then
-					-- do nothing. We don't have screen space
-					bhasnext = true -- let the end routine know we have a next button
-					--print("has next!")
-					break
-				end
-				--print("next column" .. x .. " " .. colpos )
-				linepos = 2
-				colpos = 40
+				if ( linepos >= y-4 ) then
+				--	if( colpos + 60 >= x ) then
+						-- do nothing. We don't have screen space
+					--	bhasnext = true -- let the end routine know we have a next button
+						--print("has next!")
+					--	break
+				--	end
+					--print("next column" .. x .. " " .. colpos )
+					linepos = 2
+					colpos = 40
 
-			end
+				end
 				tids = tids + 1
-			else
-				id = id + 1
 		end
+			if ( tids >= maxitemsdisplayed ) then
+				bhasnext = true
+			end
+		id = id + 1
 	end
 	if( pageid ~= 1 ) then
 		m.obj.setCursorPos(2+2, y-1)
+		newhit = {} -- our new hit test obj
+		topLeft = {}
+		bottomRight = {}
+		topLeft.x = 2+2
+		topLeft.y = y-1
+		bottomRight.x = x + #"Back"
+		bottomRight.y = y
+		newhit.topLeft = topLeft
+		newhit.bottomRight = bottomRight
+		newhit.func = printItemPageEx
+		newhit.funcargs = {}
+		newhit.funcargs.db = db
+		newhit.funcargs.pageid = pageid - 1
+		newhit.funcargs.m = m
+		--newhit.funcargs = args
+		--newhit.funcargs.pageoverride = pageid+1
+		table.insert(hitgrid, newhit)
 		m.obj.write("Back")
 	end
 	if( bhasnext ) then
+		--local nextpagestr = "Next Page"
 		m.obj.setCursorPos(x- (#"Next Page"+8) , y-1)
+		newhit = {} -- our new hit test obj
+		topLeft = {}
+		bottomRight = {}
+		topLeft.x = x- (#"Next Page"+8)
+		topLeft.y = y-1
+		bottomRight.x = x + #"Next Page"
+		bottomRight.y = y
+		newhit.topLeft = topLeft
+		newhit.bottomRight = bottomRight
+		newhit.func = printItemPageEx
+		newhit.funcargs = {}
+		newhit.funcargs.db = db
+		newhit.funcargs.pageid = pageid + 1
+		newhit.funcargs.m = m
+		--newhit.funcargs = args
+		--newhit.funcargs.pageoverride = pageid+1
+		table.insert(hitgrid, newhit)
 		m.obj.write("Next Page")
 	end
 	m.hitgrid = hitgrid
@@ -875,10 +1007,6 @@ function updateMonitors(monin)
 end
 
 doTicker = function()
-	if ( m == nil ) then
-		print("No monitor found on left, this will be a problem.")
-	end
-
 	local x = os.clock()
 	while (true) do
 		if (os.clock() - x) > 5 then
@@ -890,8 +1018,9 @@ doTicker = function()
 		curmons = updateMonitors(curmons)
 		for i, mon in ipairs(curmons) do
 			if( mon.obj ~= nil and (mon.pageName == nil or mon.pageName == "printItemPage") ) then
-				mon = printItemPage(database, 1, mon)
-				print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+				if( mon.pageid == nil ) then mon.pageid = 1 end
+				mon = printItemPage(database, mon.pageid, mon)
+				--print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
 			end
 		end
 		sleep(1)
@@ -907,10 +1036,10 @@ main = function()
 			--print("Received a message..." .. id)
 			--print(message)
 			--local b, c
-			local b, t, c = validateWeeblerMsg(message)
+			local b, t, c, to = validateWeeblerMsg(message)
 			if  (b == true ) then
-				--print("Received a valid message, processing command: " .. c )
-				processCmd(t, c, id)
+				--if( c == "getResponse" ) then print("Received a valid message, processing command: " .. message ) end
+				processCmd(t, c, id, to)
 				
 			end
 		end
@@ -923,38 +1052,19 @@ end
 
 sendLoop = function()
 	while (true) do
-		local tm = {}
-		tm.uuid = 3
-		tm.amount = 493
-		st = textutils.serialize(tm)
-		local msg = makemsg( os.getComputerID(), 0, "queryStorage", st )
+		local msg = makemsg( os.getComputerID(), 0, "queryStorage", "" )
 		--print( msg )
 		rednet.broadcast(msg)
-		sleep(2)
-
+		sleep(10)
 	end
 end
-
-
-
 
 function key1(x1, x2, y1, y2)
 event, side, X, Y = os.pullEventRaw()
   if event == "monitor_touch" then
-	--print("event!")
-	--print(side)
-	--print(X)
-	--print(Y)
-	--local colpos = 1
-	--local linepos = 1
-	hitTest(curmons, side, X, Y)
-	--m.setCursorPos(colpos,linepos)
+	
 	print("X = " .. X .. ", Y = " .. Y .. ", side = " .. side )
-         -- if (x1 <= X and x2 >= X and y1 <= Y and y2 >= Y) then
-         --       bip()
-         -- else
-         --       bop()
-         -- end
+	hitTest(curmons, side, X, Y)
   else
 
   end
@@ -966,4 +1076,6 @@ touchLoop = function()
 	end
 end
 
+local modemInit = initModem()
+if( modemInit ~= true ) then return end
 parallel.waitForAll (main, sendLoop, doTicker, touchLoop)
