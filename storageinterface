@@ -621,8 +621,8 @@ getRequestPendingScreen = function(args)
 			if( y[1].uuid == args.uuid ) then
 				idofcluster = value.computerID
 				nameofcluster = value.computerLabel
-				print(value.computerID)
-				print(value.computerLabel)
+				--print(value.computerID)
+				--print(value.computerLabel)
 				if( value.online == true ) then
 					found = true
 					else
@@ -632,9 +632,16 @@ getRequestPendingScreen = function(args)
 		end
 	end
 	if( found == false ) then
-		printToCenterScreen(args.mon.obj, "Cluster " .. nameofcluster .. " [" .. idofcluster .. "]" .. " is offline", 1)
-		sleep(2)
+		if( nameofcluster ~= "" ) then
+			printToCenterScreen(args.mon.obj, "Cluster " .. nameofcluster .. " [" .. idofcluster .. "]" .. " is offline", 1)
+			sleep(2)
+			else
+				printToCenterScreen(args.mon.obj, "Unable to find resource", 1)
+				sleep(2)
+		end
+
 		printItemPageEx(args.cancelargs)
+		return
 	end
 	local s = makemsg(os.getComputerID(), 0, "get", textutils.serialize(req))
 	sendCmd(0, s)
