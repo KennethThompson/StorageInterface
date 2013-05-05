@@ -4,6 +4,8 @@ local database = {}
 local idLookup = {}
 local curmons = nil
 local currentResult = nil
+local lastSorterResponse = 0
+local storageClusters = {}
 
 function newT( t )
    local mt = {}
@@ -349,11 +351,30 @@ function processGetResponse(cmd)
 	currentResult.result = tmp.result
 	currentResult.msg = tmp.msg
 end
-
+function processQueryClusterListResponse(cmd)
+	local tmp = loadTable( cmd )
+	--print(to_string(tmp))-
+	--print(cmd)
+	--print(cmd)
+	if( tmp ~= nil and type(tmp) == "table" and lenTable(tmp) > 0 ) then
+		storageClusters = tmp
+		--print(to_string(tmp))
+		--for key, value in pairs (tmp) do
+			--print(to_string(value))
+			--print(value.computerLabel)
+		--end
+		-- for item = 1, #tmp do
+			-- for key, value in pairs (tmp[item]) do
+			-- end
+		-- end
+	end
+end
 function processCmd(ctype, cmd, resp, to)
-	if( ctype:lower() == "query" ) then
+	--print(ctype)
+	if( ctype:lower() == "querystorageresponse" ) then
+		lastSorterResponse = os.clock()
 		local tmp = loadTable( cmd )
-		if( #tmp > 0 and type(tmp) == "table" ) then
+		if( tmp ~= nil and #tmp > 0 and type(tmp) == "table" ) then
 			for item = 1, #tmp do
 				for key, value in pairs (tmp[item]) do
 					--print( item .. " " .. key .. " " .. queryItemName(tonumber(value.uuid)) )
@@ -379,6 +400,12 @@ function processCmd(ctype, cmd, resp, to)
 		print("Restart received")
 		sleep(5)
 		processRestartCmd(resp);
+	end
+	if( ctype:lower() == "queryclusterlistresponse" ) then
+		--print("queryClusterListResponse received")
+		--sleep(5)
+		--processRestartCmd(resp);
+		processQueryClusterListResponse(cmd)
 	end
 	if( ctype:lower() == "getresponse" ) then
 		if( to == os.getComputerID() ) then
@@ -514,7 +541,7 @@ function initModem()
 		for i, dir in ipairs(dirs) do
 		  	if peripheral.isPresent(dir) and peripheral.getType(dir) == "modem" then
 				rednet.open(dir)
-				print("Found a modem on the " .. dir .. " side.")
+				--print("Found a modem on the " .. dir .. " side.")
 				return true
 			end
 		end
@@ -526,7 +553,7 @@ printItemID = function(id)
 end
 
 modifySelectedCount = function(args)
-	print("Modifying on screen amounts" .. args.modifier)
+	--print("Modifying on screen amounts" .. args.modifier)
 	args.oldargs.count = args.oldargs.count + args.modifier
 	resourceSelectedScreen(args.oldargs)
 end
@@ -540,7 +567,7 @@ function printToCenterScreen(mon, msg, scale)
 	local midpointx = x / 2
 	local midpointy = y / 2
 	local strl = #msg
-	strl = midpointx - (strl/2)
+	strl = ((x - (strl))/2)
 	local colpos = strl
 	local linepos = midpointy
 	
@@ -549,8 +576,28 @@ function printToCenterScreen(mon, msg, scale)
 	mon.write(msg)
 
 end
+sendRebootPendingScreen = function(args)
 
+	local req = {}
+	currentResult = nil
+	--req.uuid = args.uuid
+	--req.amount = args.count
+	
+	local s = makemsg(os.getComputerID(), tostring(args.computerID), "restart", "")
+	sendCmd(0, s)
+	clusterSelectedScreen(args)
+end
+sendDumpPendingScreen = function(args)
 
+	local req = {}
+	currentResult = nil
+	--req.uuid = args.uuid
+	--req.amount = args.count
+	
+	local s = makemsg(os.getComputerID(), tostring(args.computerID), "dump", "")
+	sendCmd(0, s)
+	clusterSelectedScreen(args)
+end
 getRequestPendingScreen = function(args)
 	if( args.count <= 0 ) then
 	resourceSelectedScreen(args)
@@ -564,6 +611,31 @@ getRequestPendingScreen = function(args)
 	currentResult = nil
 	req.uuid = args.uuid
 	req.amount = args.count
+	local found = false
+	local idofcluster = 0
+	local nameofcluster = ""
+	for key, value in pairs (storageClusters) do
+		for x, y in pairs(value.resources) do
+			--print(y)
+			--print(.uuid)
+			if( y[1].uuid == args.uuid ) then
+				idofcluster = value.computerID
+				nameofcluster = value.computerLabel
+				print(value.computerID)
+				print(value.computerLabel)
+				if( value.online == true ) then
+					found = true
+					else
+					found = false
+				end
+			end
+		end
+	end
+	if( found == false ) then
+		printToCenterScreen(args.mon.obj, "Cluster " .. nameofcluster .. " [" .. idofcluster .. "]" .. " is offline", 1)
+		sleep(2)
+		printItemPageEx(args.cancelargs)
+	end
 	local s = makemsg(os.getComputerID(), 0, "get", textutils.serialize(req))
 	sendCmd(0, s)
 	local x = os.clock()
@@ -606,6 +678,92 @@ getRequestPendingScreen = function(args)
 	--printItemPageEx(args.cancelargs)
 end
 
+menuScreen = function(args)
+
+end
+
+clusterSelectedScreen = function(args)
+	--print("Cluster selected!")
+		local colpos = 3 -- start positions for the page
+	local linepos = 2
+	args.mon.hitgrid = {}
+	args.mon.obj.setTextScale(2) --Sets size
+	local x, y = args.mon.obj.getSize()
+	--print("Inside clusterSelectedScreen")
+	args.mon.pageName = "clusterSelectedScreen" 
+	linepos = y -- set to the bottom of the screen
+	args.mon.obj.clear()
+	args.mon.obj.setCursorPos(colpos,linepos)
+	args.mon.obj.write("Cancel")
+	
+	local newhit = {} -- our new hit test obj
+	local topLeft = {}
+	local bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = #"Cancel"--colpos+50 -- fixed number for now
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = printClustersScreenEx
+	newhit.funcargs = args.cancelargs
+	table.insert(args.mon.hitgrid, newhit)
+	
+	
+		
+	linepos = 2
+	local midpoint = x / 2
+	local strl = #("Cluster: " .. args.computerLabel)
+	local strl = ((x - (strl))/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	args.mon.obj.write("Cluster: " .. args.computerLabel)
+	
+	
+	linepos = y / 2
+	local midpoint = x / 2
+	
+	local strl = #"Reboot"
+	local strl = ((x - (strl))/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"Reboot"
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = sendRebootPendingScreen
+	newhit.funcargs = args
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("Reboot")
+	
+	linepos = linepos + 2
+	local midpoint = x / 2
+	local strl = #"Dump All"
+	local strl = ((x - (strl))/2)
+	colpos = strl
+	args.mon.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = linepos
+	bottomRight.x = colpos + #"Dump All"
+	bottomRight.y = linepos
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = sendDumpPendingScreen
+	newhit.funcargs = args
+	table.insert(args.mon.hitgrid, newhit)
+	args.mon.obj.write("Dump All")
+
+end
+
+
 resourceSelectedScreen = function(args)
 
 	-- args.mon is the current monitor
@@ -620,7 +778,7 @@ resourceSelectedScreen = function(args)
 	args.mon.hitgrid = {}
 	args.mon.obj.setTextScale(2) --Sets size
 	local x, y = args.mon.obj.getSize()
-	print("Inside resourceSelectedScreen")
+	--print("Inside resourceSelectedScreen")
 	args.mon.pageName = "resourceSelectedScreen" 
 	linepos = y -- set to the bottom of the screen
 	args.mon.obj.clear()
@@ -795,8 +953,23 @@ resourceSelectedScreen = function(args)
 end
 printItemPageEx = function(args)
 	args.m.obj.clear()
-	print("Printing page " ..  args.pageid)
+	--print("Printing page " ..  args.pageid)
 	printItemPage(args.db, args.pageid, args.m)
+end
+printDisconnectedPage = function (mon)
+	local colpos = 3 -- start positions for the page
+	local linepos = 2
+	--args.mon.hitgrid = {}
+	--args.mon.obj.setTextScale(2) --Sets size
+	--local x, y = args.mon.obj.getSize()
+	--print("Inside printDisconnectedPage")
+	printToCenterScreen(mon.obj, "Waiting for sorter..", 1 )
+	sleep(1.5)
+	printToCenterScreen(mon.obj, "Is it off?", 1 )
+	sleep(1.5)
+	printToCenterScreen(mon.obj, "Try turning it on..", 1 )
+
+	return mon
 end
 printItemPage = function(db, pageid, m)
 	--m.clear()
@@ -822,19 +995,21 @@ printItemPage = function(db, pageid, m)
 	
 	table.sort(ndatabase, function(x,y) return x.value.name < y.value.name end)
 	--local startid = (y-2) / (pageid-1)
-	local maxcols = math.floor(x / 60)
+	local maxcols = math.floor(x / 30)
 	if ( maxcols == 0 ) then maxcols = 1 end
+
 	
-	--print( "MAX X = " .. x .. " MAX Y = " .. y)
-	local maxrows = (y-6)/2
-	local maxitemsdisplayed = maxcols * maxrows
+	local maxrows = (y-4) / 2
+	local maxitemsdisplayed = math.floor(maxcols * maxrows)
 	--local cnt = lenTable(ndatabase)
 	local startid = maxitemsdisplayed * (pageid-1)--(pageid-1)  cnt;
 	--print ("Database has " .. dbCount .. " items.")
-	print("start id " .. startid)
+	--print("start id " .. startid)
 	local id = 0
 	local tids = 0
 	local bhasnext = false
+	--print( "MAX X = " .. x .. " MAX Y = " .. y .. " MAXITEMS = " .. maxitemsdisplayed .. " startid= " .. startid)
+
 	for _,t in ipairs(ndatabase) do 
 			--print( "id " .. id .. " start id " .. startid .. " tids " .. tids .. " max items " .. maxitemsdisplayed )
 			if (id >= startid and tids < maxitemsdisplayed ) then
@@ -885,25 +1060,34 @@ printItemPage = function(db, pageid, m)
 				m.obj.write("[" .. t.value.amount .. "]")
 
 				linepos = linepos + 2
-				
-				if ( linepos >= y-4 ) then
-				--	if( colpos + 60 >= x ) then
-						-- do nothing. We don't have screen space
-					--	bhasnext = true -- let the end routine know we have a next button
-						--print("has next!")
-					--	break
-				--	end
-					--print("next column" .. x .. " " .. colpos )
+				--print(linepos .. " " .. y .. " tids " .. tids)
+				if( linepos > y-4 ) then
 					linepos = 2
 					colpos = 40
-
 				end
+				-- if ( linepos >= (maxrows-6) ) then
+					-- -- if( colpos + 60 >= x ) then
+						-- -- -- do nothing. We don't have screen space
+					-- -- --	bhasnext = true -- let the end routine know we have a next button
+						-- -- --print("has next!")
+						-- -- break
+					-- -- end
+					-- --print("next column" .. x .. " " .. colpos )
+					-- linepos = 2
+					-- colpos = 40
+					-- print(colpos)
+				-- end
 				tids = tids + 1
+				--print( id .. " " .. dbCount )
+				if ( id < dbCount-1 ) then
+					bhasnext = true
+					else
+					bhasnext = false
+				end
 		end
-			if ( tids >= maxitemsdisplayed ) then
-				bhasnext = true
-			end
+
 		id = id + 1
+
 	end
 	if( pageid ~= 1 ) then
 		m.obj.setCursorPos(2+2, y-1)
@@ -928,11 +1112,11 @@ printItemPage = function(db, pageid, m)
 	end
 	if( bhasnext ) then
 		--local nextpagestr = "Next Page"
-		m.obj.setCursorPos(x- (#"Next Page"+8) , y-1)
+		m.obj.setCursorPos(x- (#"Next Page"+4) , y-1)
 		newhit = {} -- our new hit test obj
 		topLeft = {}
 		bottomRight = {}
-		topLeft.x = x- (#"Next Page"+8)
+		topLeft.x = x- (#"Next Page"+4)
 		topLeft.y = y-1
 		bottomRight.x = x + #"Next Page"
 		bottomRight.y = y
@@ -948,6 +1132,245 @@ printItemPage = function(db, pageid, m)
 		table.insert(hitgrid, newhit)
 		m.obj.write("Next Page")
 	end
+	-- print menu selector
+	local midpointx = x / 2
+	--local midpointy = y / 2
+	local strl = #"[Clusters]"
+	strl = ((x - (strl))/2)
+	local colpos = strl
+	local linepos = y
+	m.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = y-1
+	bottomRight.x = colpos + #"[Clusters]"
+	bottomRight.y = y
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = printClustersScreenEx
+	newhit.funcargs = {}
+	newhit.funcargs.clusterdb = storageClusters
+	newhit.funcargs.db = db
+	newhit.funcargs.pageid = 1
+	newhit.funcargs.m = m
+	--newhit.funcargs = args
+	--newhit.funcargs.pageoverride = pageid+1
+	table.insert(hitgrid, newhit)
+	m.obj.write("[Clusters]")
+	
+	m.hitgrid = hitgrid
+	return m
+	--image = paintutils.loadImage("bar")
+	--paintutils.drawImage(image, 3, 5)
+
+end
+printClustersScreenEx = function(args)
+	args.m.obj.clear()
+	--print("Printing clusters page " ..  args.pageid)
+	printClustersScreen(args.clusterdb, args.pageid, args.m)
+end
+printClustersScreen = function(clusterdb, pageid, m)
+	--m.clear()
+	if( clusterdb == nil ) then	
+		clusterdb = {}
+	end
+	m.obj.setCursorBlink(false)
+	m.pageName = "printClustersScreen"
+	m.obj.setTextScale(1) --Sets size
+	m.pageid = pageid
+	
+	local hitgrid = {} -- our hit grid for the printed page
+	
+	local colpos = 3 -- start positions for the page
+	local linepos = 2
+	--
+	local x, y = m.obj.getSize()
+	
+	local dbCount = 0;
+
+	for key, value in pairs (clusterdb) do
+		--value.name = queryItemName(tonumber(value.uuid))
+		dbCount = dbCount + 1
+	end
+	local ndatabase = SortFunc(clusterdb)
+	
+	table.sort(ndatabase, function(x,y) return x.value.computerLabel < y.value.computerLabel end)
+
+	local maxcols = 1 -- math.floor(x / 30)
+	
+	
+	local maxrows = (y-4) / 2
+	local maxitemsdisplayed = math.floor(maxcols * maxrows)
+	local startid = maxitemsdisplayed * (pageid-1)--(pageid-1)  cnt;
+	--print(startid)
+	local id = 0
+	local tids = 0
+	local bhasnext = false
+	--print( "MAX X = " .. x .. " MAX Y = " .. y .. " MAXITEMS = " .. maxitemsdisplayed .. " startid= " .. startid)
+	for _,t in ipairs(ndatabase) do 
+		--	print( "id " .. id .. " start id " .. startid .. " tids " .. tids .. " max items " .. maxitemsdisplayed )
+			if (id >= startid and tids < maxitemsdisplayed ) then
+				
+				local newhit = {} -- our new hit test obj
+				-- we're going to take the top left and bottom right
+				local topLeft = {}
+				local bottomRight = {}
+				
+				topLeft.x = colpos
+				topLeft.y = linepos
+				
+				bottomRight.x = colpos + 50
+				bottomRight.y = linepos
+				
+				newhit.topLeft = topLeft
+				newhit.bottomRight = bottomRight
+				newhit.func = clusterSelectedScreen
+				-- args.mon is the current monitor
+				-- args.uuid is the UID of the crap we're expecting
+				-- args.name is the name of the UUID for human readability
+				-- args.cancel is the function to which we default cancel to
+				-- args.amount is how much we got
+				-- args.count is how much they want, zero for default
+				local args = {}
+				args.mon = m
+				args.computerID = t.value.computerID
+				args.computerLabel = t.value.computerLabel
+				args.cancel = clusterSelectedScreen
+				local cancelargs = {}
+				cancelargs.db = database
+				cancelargs.clusterdb = clusterdb
+				cancelargs.pageid = pageid
+				cancelargs.m = m
+				args.cancelargs = cancelargs
+				--args.amount = t.value.amount
+				--args.count = 0
+				newhit.funcargs = args
+				
+				table.insert(hitgrid, newhit)
+				
+				m.obj.setCursorPos(colpos,linepos)
+				m.obj.write(string.rep(" ",25)) -- clear the line
+				m.obj.setCursorPos(colpos,linepos)
+				m.obj.write(t.value.computerLabel)-- .. "\t" .. " Count = " .. t.value.amount );
+				m.obj.setCursorPos(colpos+25,linepos)
+				m.obj.write(string.rep(" ", 25)) -- clear the line
+				m.obj.setCursorPos(colpos+25,linepos)
+				if( t.value.online == true ) then
+					m.obj.setBackgroundColour(colours.green)
+					m.obj.write("[Online]")
+					m.obj.setBackgroundColour(colours.black)
+					else
+					m.obj.setBackgroundColour(colours.red)
+					m.obj.write("[Offline]")
+					m.obj.setBackgroundColour(colours.black)
+				end
+				
+				
+
+				linepos = linepos + 2
+				--print(linepos .. " " .. y .. " tids " .. tids)
+				if( linepos > y-4 ) then
+					linepos = 2
+					colpos = 40
+				end
+				-- if ( linepos >= (maxrows-6) ) then
+					-- -- if( colpos + 60 >= x ) then
+						-- -- -- do nothing. We don't have screen space
+					-- -- --	bhasnext = true -- let the end routine know we have a next button
+						-- -- --print("has next!")
+						-- -- break
+					-- -- end
+					-- --print("next column" .. x .. " " .. colpos )
+					-- linepos = 2
+					-- colpos = 40
+					-- print(colpos)
+				-- end
+				tids = tids + 1
+				--print( id .. " " .. dbCount )
+				if ( id < dbCount-1 ) then
+					bhasnext = true
+					else
+					bhasnext = false
+				end
+		end
+
+		id = id + 1
+
+	end
+	if( pageid ~= 1 ) then
+		m.obj.setCursorPos(2+2, y-1)
+		newhit = {} -- our new hit test obj
+		topLeft = {}
+		bottomRight = {}
+		topLeft.x = 2+2
+		topLeft.y = y-1
+		bottomRight.x = x + #"Back"
+		bottomRight.y = y
+		newhit.topLeft = topLeft
+		newhit.bottomRight = bottomRight
+		newhit.func = printClustersScreenEx
+		newhit.funcargs = {}
+		newhit.funcargs.db = database
+		newhit.funcargs.clusterdb = clusterdb
+		newhit.funcargs.pageid = pageid - 1
+		newhit.funcargs.m = m
+		--newhit.funcargs = args
+		--newhit.funcargs.pageoverride = pageid+1
+		table.insert(hitgrid, newhit)
+		m.obj.write("Back")
+	end
+	if( bhasnext ) then
+		--local nextpagestr = "Next Page"
+		m.obj.setCursorPos(x- (#"Next Page"+4) , y-1)
+		newhit = {} -- our new hit test obj
+		topLeft = {}
+		bottomRight = {}
+		topLeft.x = x- (#"Next Page"+4)
+		topLeft.y = y-1
+		bottomRight.x = x + #"Next Page"
+		bottomRight.y = y
+		newhit.topLeft = topLeft
+		newhit.bottomRight = bottomRight
+		newhit.func = printClustersScreenEx
+		newhit.funcargs = {}
+		newhit.funcargs.db = database
+		newhit.funcargs.clusterdb = db
+		newhit.funcargs.pageid = pageid + 1
+		newhit.funcargs.m = m
+		--newhit.funcargs = args
+		--newhit.funcargs.pageoverride = pageid+1
+		table.insert(hitgrid, newhit)
+		m.obj.write("Next Page")
+	end
+	-- print menu selector
+	local midpointx = x / 2
+	--local midpointy = y / 2
+	local strl = #"[Resources]"
+	strl = ((x - (strl))/2)
+	local colpos = strl
+	local linepos = y
+	m.obj.setCursorPos(colpos,linepos)
+	newhit = {} -- our new hit test obj
+	topLeft = {}
+	bottomRight = {}
+	topLeft.x = colpos
+	topLeft.y = y-1
+	bottomRight.x = colpos + #"[Resources]"
+	bottomRight.y = y
+	newhit.topLeft = topLeft
+	newhit.bottomRight = bottomRight
+	newhit.func = printItemPageEx
+	newhit.funcargs = {}
+	newhit.funcargs.db = database
+	newhit.funcargs.clusterdb = clusterdb
+	newhit.funcargs.pageid = 1
+	newhit.funcargs.m = m
+	--newhit.funcargs = args
+	--newhit.funcargs.pageoverride = pageid+1
+	table.insert(hitgrid, newhit)
+	m.obj.write("[Resources]")
 	m.hitgrid = hitgrid
 	return m
 	--image = paintutils.loadImage("bar")
@@ -1008,21 +1431,65 @@ end
 
 doTicker = function()
 	local x = os.clock()
+	lastSorterResponse = os.clock()
+	local bfirststart = true
 	while (true) do
 		if (os.clock() - x) > 5 then
 			local file = 'idlookup'
 			local status, err = pcall(loadLookups, file)
 			x = os.clock()
 		end
-		--local checkm = locateScreens()
 		curmons = updateMonitors(curmons)
-		for i, mon in ipairs(curmons) do
-			if( mon.obj ~= nil and (mon.pageName == nil or mon.pageName == "printItemPage") ) then
-				if( mon.pageid == nil ) then mon.pageid = 1 end
-				mon = printItemPage(database, mon.pageid, mon)
-				--print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+		if( bfirststart == true ) then
+			--print("First start is true")
+			for i, mon in ipairs(curmons) do
+				if( mon.obj ~= nil ) then
+					
+					printToCenterScreen(mon.obj, "WEEBLER STORAGE", 1)
+					sleep(1.5)
+					printToCenterScreen(mon.obj, "Starting up. Please wait..", 1)
+					--sleep(10)
+					--print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+				end
+			end
+			bfirststart = false
+		end
+		if ( os.clock() - lastSorterResponse > 20 ) then
+			for i, mon in ipairs(curmons) do
+				if( mon.obj ~= nil ) then
+					--if( mon.pageid == nil ) then mon.pageid = 1 end
+					mon = printDisconnectedPage(mon)
+					mon.pageid = nil
+					mon.pageName = nil
+					sleep(1)
+					--print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+				end
+			end
+			else
+			for i, mon in ipairs(curmons) do
+				if( mon.obj ~= nil and (mon.pageName == nil or mon.pageName == "printItemPage") ) then
+					if( mon.pageid == nil ) then 
+						mon.pageid = 1 
+						mon.obj.clear()
+					end
+					mon = printItemPage(database, mon.pageid, mon)
+					--print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+				end
+				if( mon.obj ~= nil and (mon.pageName == nil or mon.pageName == "printClustersScreen") ) then
+					if( mon.pageid ~= nil ) then 
+						--mon.pageid = 1 
+						--mon.obj.clear()
+						mon = printClustersScreen(storageClusters, mon.pageid, mon)
+					end
+					
+					--print(mon.side .. " has " .. lenTable(mon.hitgrid) .. " items" )
+				end
 			end
 		end
+		
+		--local checkm = locateScreens()
+
+
 		sleep(1)
 	end
 end
@@ -1053,7 +1520,10 @@ end
 sendLoop = function()
 	while (true) do
 		local msg = makemsg( os.getComputerID(), 0, "queryStorage", "" )
+		
 		--print( msg )
+		rednet.broadcast(msg)
+		msg = makemsg( os.getComputerID(), 0, "queryClusterList", "" )
 		rednet.broadcast(msg)
 		sleep(10)
 	end
@@ -1063,7 +1533,7 @@ function key1(x1, x2, y1, y2)
 event, side, X, Y = os.pullEventRaw()
   if event == "monitor_touch" then
 	
-	print("X = " .. X .. ", Y = " .. Y .. ", side = " .. side )
+	--print("X = " .. X .. ", Y = " .. Y .. ", side = " .. side )
 	hitTest(curmons, side, X, Y)
   else
 
@@ -1078,4 +1548,7 @@ end
 
 local modemInit = initModem()
 if( modemInit ~= true ) then return end
+if ( os.getComputerLabel() == nil or os.getComputerLabel == "" ) then
+	os.setComputerLabel(tostring(os.getComputerID()))
+end
 parallel.waitForAll (main, sendLoop, doTicker, touchLoop)
