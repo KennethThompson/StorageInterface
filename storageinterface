@@ -671,8 +671,8 @@ getRequestPendingScreen = function(args)
 		printItemPageEx(args.cancelargs)
 		return
 	end
-	local s = makemsg(os.getComputerID(), 0, "get", textutils.serialize(req))
-	sendCmd(0, s)
+	local s = makemsg(os.getComputerID(), idofcluster, "get", textutils.serialize(req))
+	sendCmd(idofcluster, s)
 	local x = os.clock()
 	
 	while (true) do
