@@ -682,7 +682,7 @@ getRequestPendingScreen = function(args)
 			printItemPageEx(args.cancelargs)
 			return
 		end
-		if (os.clock() - x) > 5 then
+		if (os.clock() - x) > 10 then
 			printToCenterScreen(args.mon.obj, "FAIL", 2)
 			sleep(2)
 			printItemPageEx(args.cancelargs)
@@ -1489,7 +1489,7 @@ doTicker = function()
 			end
 			bfirststart = false
 		end
-		if ( os.clock() - lastSorterResponse > 20 ) then
+		if ( os.clock() - lastSorterResponse > 30 ) then
 			for i, mon in ipairs(curmons) do
 				if( mon.obj ~= nil ) then
 					--if( mon.pageid == nil ) then mon.pageid = 1 end
