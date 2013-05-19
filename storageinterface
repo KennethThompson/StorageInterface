@@ -22,6 +22,60 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. In short,
 don't blame me if your server blows up.
 
 --]]
+
+-- Config
+screenw,screenh = term.getSize()
+-- Config
+local program = "Storage Interface"
+local version = "v1.1"
+local author = "Horace"
+local systemFrequency = "Default"
+local systemSubfrequency = "A"
+
+local systemConfig = { [0] = { systemFrequency = systemFrequency, systemSubfrequency = systemSubfrequency }  }
+
+-- Functions
+function saveTableToFile(table,name)
+	local file = fs.open(name,"w")
+	file.write(textutils.serialize(table))
+	file.close()
+end
+
+function loadTableFromFile(name)
+	if ( fs.exists(name) ~= true ) then
+		return nil
+	end
+	local file = fs.open(name,"r")
+	local data = file.readAll()
+	file.close()
+	return textutils.unserialize(data)
+end
+
+function printReverse(str, xpos, ypos)
+	term.setCursorPos(xpos - (#str-1), ypos)
+	term.write (str)
+end
+
+function printForward(str, xpos, ypos)
+	term.setCursorPos(xpos, ypos)
+	term.write (str)
+end
+
+function printCentered(str, ypos)
+	term.setCursorPos(screenw/2 - #str/2, ypos)
+	term.write(str)
+end
+
+function printRight(str, ypos)
+	term.setCursorPos(screenw - #str, ypos)
+	term.write(str)
+end
+
+function printLeft(str, ypos)
+	term.setCursorPos(1, ypos)
+	term.write(str)
+end
+
 print("Starting up interface..")
 --rednet.open("back")
 local database = {}
@@ -283,7 +337,7 @@ end
 
  function makemsg(idfrom, idto, msgType, msg)
 	local final = ""
-	final = "HORACEV1|"  .. idfrom .. "|" .. idto .. "|" .. msgType .."|" .. msg
+	final = "HORACEV1A|" .. systemConfig[0].systemFrequency .. "::" .. systemConfig[0].systemSubfrequency .. "|" .. idfrom .. "|" .. idto .. "|" .. msgType .."|" .. msg
 	return final
 end
 
@@ -309,16 +363,23 @@ function validateWeeblerMsg( msg )
 	 local directedTo = 0
 	 for i,v in pairs(explode("|", message)) do
 		 if ( m == 0 ) then
-			 if( v == "HORACEV1" ) then
+			 if( v == "HORACEV1A" ) then
 				-- print("WeeblerV1 message: TRUE")
 				 else
 					 return ret
 			 end
 		 end
-		 if ( m == 1 ) then
-			 --print( "Msg From: " .. v )
+		 if ( m == 1 ) then -- this is our frequency/subfrequency area
+			local curFreq = systemConfig[0].systemFrequency .. "::" .. systemConfig[0].systemSubfrequency
+			if( v:lower() == curFreq:lower() ) then
+				else
+					return ret -- fail
+			end
 		 end
 		 if ( m == 2 ) then
+			 --print( "Msg From: " .. v )
+		 end
+		 if ( m == 3 ) then
 			if( tonumber(v) == os.getComputerID() ) then
 				--print("Received a message to us! " .. msg)
 				directedTo = tonumber(v)
@@ -333,13 +394,13 @@ function validateWeeblerMsg( msg )
 					
 			 end
 		 end
-		 if ( m == 3 ) then
+		 if ( m == 4 ) then
 			 --print( "CmdType: " .. v )
 			 ctype = v
 			 --cmd = v
 			 --return ret, cmd
 		 end
-		 if ( m == 4 ) then
+		 if ( m == 5 ) then
 			 --print( "Command: " .. v )
 			 cmd = v
 			 return ret, ctype, cmd, directedTo
@@ -1537,6 +1598,13 @@ end
 
 main = function()
  	local x = os.clock()
+	local _config = loadTableFromFile("systemConfig")
+	if( _config == nil ) then
+		saveTableToFile( systemConfig, "systemConfig" )
+		else
+		systemConfig = _config
+	end
+	
 	while (true) do
 		id, message  = rednet.receive(1)
 		if id ~= nill and id ~= os.getComputerID() then
