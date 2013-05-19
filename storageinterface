@@ -1059,8 +1059,8 @@ printItemPage = function(db, pageid, m)
 
 	--print (pageid)
 	
-	local maxloop = maxitemsdisplayed
-	if( startid + maxitemsdisplayed > dbCount ) then
+	local maxloop = maxitemsdisplayed + startid
+	if( (startid + maxitemsdisplayed) > dbCount ) then
 		maxloop = dbCount
 	end
 	for sid = startid+1, maxloop do
