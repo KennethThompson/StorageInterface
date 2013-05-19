@@ -1006,6 +1006,8 @@ printDisconnectedPage = function (mon)
 
 	return mon
 end
+
+local sorteddb = nil
 printItemPage = function(db, pageid, m)
 	--m.clear()
 	m.obj.setCursorBlink(false)
@@ -1026,7 +1028,17 @@ printItemPage = function(db, pageid, m)
 		value.name = queryItemName(tonumber(value.uuid))
 		dbCount = dbCount + 1
 	end
-	local ndatabase = SortFunc(db)
+	local ndatabase = {} -- sorteddb
+	if ( sorteddb == nil  ) then
+		sorteddb = SortFunc(db)
+		ndatabase = sorteddb
+	elseif ( dbCount ~= lenTable(sorteddb) or dbCount == 0 ) then
+		sorteddb = SortFunc(db)
+		ndatabase = sorteddb
+		else
+		ndatabase = sorteddb
+	end
+	--local ndatabase = SortFunc(db)
 	
 	table.sort(ndatabase, function(x,y) return x.value.name < y.value.name end)
 	--local startid = (y-2) / (pageid-1)
@@ -1045,15 +1057,22 @@ printItemPage = function(db, pageid, m)
 	local bhasnext = false
 	--print( "MAX X = " .. x .. " MAX Y = " .. y .. " MAXITEMS = " .. maxitemsdisplayed .. " startid= " .. startid)
 
-	for _,t in ipairs(ndatabase) do 
-			--print( "id " .. id .. " start id " .. startid .. " tids " .. tids .. " max items " .. maxitemsdisplayed )
-			if (id >= startid and tids < maxitemsdisplayed ) then
-				
-				local newhit = {} -- our new hit test obj
-				-- we're going to take the top left and bottom right
+	--print (pageid)
+	
+	local maxloop = maxitemsdisplayed
+	if( startid + maxitemsdisplayed > dbCount ) then
+		maxloop = dbCount
+	end
+	for sid = startid+1, maxloop do
+		--for _,t in ipairs(ndatabase[sid]) do 
+		--print(sid)
+		--print(to_string(ndatabase))
+			--print(dbCount)
+		--end
+					-- we're going to take the top left and bottom right
 				local topLeft = {}
 				local bottomRight = {}
-				
+				local newhit = {}
 				topLeft.x = colpos
 				topLeft.y = linepos
 				
@@ -1071,15 +1090,15 @@ printItemPage = function(db, pageid, m)
 				-- args.count is how much they want, zero for default
 				local args = {}
 				args.mon = m
-				args.uuid = t.value.uuid
-				args.name = t.value.name
+				args.uuid = ndatabase[sid].value.uuid
+				args.name = ndatabase[sid].value.name
 				args.cancel = printItemPage
 				local cancelargs = {}
 				cancelargs.db = db
 				cancelargs.pageid = pageid
 				cancelargs.m = m
 				args.cancelargs = cancelargs
-				args.amount = t.value.amount
+				args.amount = ndatabase[sid].value.amount
 				args.count = 0
 				newhit.funcargs = args
 				
@@ -1088,11 +1107,11 @@ printItemPage = function(db, pageid, m)
 				m.obj.setCursorPos(colpos,linepos)
 				m.obj.write(string.rep(" ",25)) -- clear the line
 				m.obj.setCursorPos(colpos,linepos)
-				m.obj.write(t.value.name)-- .. "\t" .. " Count = " .. t.value.amount );
+				m.obj.write(ndatabase[sid].value.name)-- .. "\t" .. " Count = " .. t.value.amount );
 				m.obj.setCursorPos(colpos+25,linepos)
 				m.obj.write(string.rep(" ", 25)) -- clear the line
 				m.obj.setCursorPos(colpos+25,linepos)
-				m.obj.write("[" .. t.value.amount .. "]")
+				m.obj.write("[" .. ndatabase[sid].value.amount .. "]")
 
 				linepos = linepos + 2
 				--print(linepos .. " " .. y .. " tids " .. tids)
@@ -1100,30 +1119,16 @@ printItemPage = function(db, pageid, m)
 					linepos = 2
 					colpos = 40
 				end
-				-- if ( linepos >= (maxrows-6) ) then
-					-- -- if( colpos + 60 >= x ) then
-						-- -- -- do nothing. We don't have screen space
-					-- -- --	bhasnext = true -- let the end routine know we have a next button
-						-- -- --print("has next!")
-						-- -- break
-					-- -- end
-					-- --print("next column" .. x .. " " .. colpos )
-					-- linepos = 2
-					-- colpos = 40
-					-- print(colpos)
-				-- end
+
 				tids = tids + 1
 				--print( id .. " " .. dbCount )
-				if ( id < dbCount-1 ) then
+
+	end
+				if ( startid + maxitemsdisplayed < dbCount-1 ) then
 					bhasnext = true
 					else
 					bhasnext = false
 				end
-		end
-
-		id = id + 1
-
-	end
 	if( pageid ~= 1 ) then
 		m.obj.setCursorPos(2+2, y-1)
 		newhit = {} -- our new hit test obj
